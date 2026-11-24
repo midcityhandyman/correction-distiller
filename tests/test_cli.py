@@ -85,6 +85,13 @@ def test_errors_exit_nonzero_with_a_message(cli):
     assert cli("pack", str(cli.tmp / "missing.json"))[0] == 1
 
 
+def test_non_utf8_input_is_an_error_not_a_traceback(cli):
+    path = cli.tmp / "utf16.jsonl"
+    path.write_text('{"quote": "Never text a customer after 8pm."}\n', encoding="utf-16")
+    code, lines = cli("ingest", str(path))
+    assert code == 1 and lines == [lines[0]] and "not UTF-8" in lines[0]
+
+
 def test_dropped_command_lists_nothing_by_default(cli):
     cli("ingest", cli.data)
     cli("distill")

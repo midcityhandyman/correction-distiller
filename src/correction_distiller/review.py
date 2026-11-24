@@ -24,7 +24,7 @@ def _reviewer(store: Store, proposal: Proposal, reviewer: str, settings: Setting
     reviewer = normalize_ws(reviewer or "")
     if not reviewer:
         raise ReviewError("a named reviewer is required")
-    if reviewer == proposal.drafted_by:
+    if reviewer.casefold() == proposal.drafted_by.casefold():
         raise ReviewError("the drafter cannot review its own proposal")
     if settings.owners and reviewer not in settings.owners:
         raise ReviewError(f"{reviewer!r} is not a configured owner")

@@ -1,13 +1,48 @@
 # correction-distiller
 
-Agents get corrected by the people they work for, and then get corrected for the same thing again next week, because the correction lived in one chat and died there.
-Letting the agent rewrite its own instructions fixes that and creates a worse problem: rules nobody approved, justified by things nobody said.
+**Stops an AI agent from needing the same correction twice, without letting it write its own rules.**
 
-## What it does
+If you supervise agents (front desk, scheduling, follow up, support), you know the loop. You tell the agent "never text a customer after 8pm", it complies in that chat, and next week it does it again, because the correction lived in one conversation and died there. Letting the agent rewrite its own instructions fixes that and creates a worse problem: rules nobody approved, justified by things nobody said.
 
-A learning loop with a human owner in the middle.
+This tool sits between the two:
 
-1. **Ingest** human corrections. Each one needs the verbatim quote, the date it was said and the context the agent was working in. Records missing any of the three are refused, not patched.
+- You feed it corrections as they happen: the exact words, the date, what the agent was doing.
+- When the same correction shows up more than once, it drafts one proposed rule and shows you the quotes behind it.
+- A draft whose quotes do not match what was actually said, character for character, is thrown out and the reason is recorded.
+- Nothing reaches the agent until a named person approves it. Approved rules go into one file the agent loads, each rule carrying its quotes, dates and approver.
+
+It is a small Python library and command line tool: standard library only, SQLite for state, 116 offline tests. The drafting step is an LLM behind an interface. What ships and is tested here is an offline mock drafter; the HTTP client for a real model has never been run against a live endpoint (see [Limitations](#limitations)).
+
+## What you will see
+
+Lines copied from `python demo/run_demo.py`, which runs two weeks of invented corrections for an invented front desk agent. `...` marks lines left out; the full capture is [`demo/output.txt`](demo/output.txt), and a test fails if this excerpt or that file drifts from what the demo prints.
+
+```
+$ correction-distiller distill
+14 corrections, 7 clusters, 5 recurring: proposed 4, dropped 1, reinforced 0, suppressed 0, declined 0, errors 0, unchanged 0
+...
+  dropped k_5c4748d29c0e: citation_not_verbatim
+...
+$ correction-distiller approve p_0ece6a8b41 --by sloppy-llm
+error: the drafter cannot review its own proposal
+$ correction-distiller approve p_0ece6a8b41 --by owner
+approved p_0ece6a8b41: Do not quote a price before the site visit is booked.
+...
+$ correction-distiller pack rulepack/rulepack.json --evidence
+Standing rules (3), approved by a human owner:
+1. Do not quote a price before the site visit is booked. [replying to a new estimate request]
+   - 2026-03-02 (replying to a new estimate request): "Do not quote a price before the site visit is booked."
+   - 2026-03-05 (replying to a new estimate request): "You quoted a price again before booking the site visit. Book the visit first."
+   - 2026-03-11 (replying to a new estimate request): "No price quotes until the site visit is on the calendar."
+...
+(appended an unapproved rule to rulepack/rulepack.json by hand)
+$ correction-distiller pack rulepack/rulepack.json
+error: pack checksum mismatch; the file was edited or is incomplete
+```
+
+## How it works
+
+1. **Ingest** human corrections from a JSON Lines file. Each one needs the verbatim quote, the date it was said and the context the agent was working in. Records missing any of the three are refused, not patched.
 2. **Cluster** corrections that say the same thing. A single correction is an incident; the same correction twice is a pattern.
 3. **Draft** one proposed rule per recurring cluster. This is the LLM step. It sits behind an interface, with an offline mock for tests and the demo.
 4. **Evidence or drop.** Every draft must cite its source quotes, and every cited quote is checked character for character against the stored correction. A paraphrased, misattributed or invented quote drops the whole draft and records why.
@@ -47,11 +82,11 @@ flowchart LR
 | `store.py` | SQLite schema, including triggers that enforce the invariants in the database |
 | `cli.py` | Command line front end |
 
-Some guarantees are enforced twice, once in Python and once as SQLite triggers, so they hold even if a later script writes to the database directly: corrections cannot be updated or deleted, a proposal can only be inserted as `pending`, it cannot become `approved` with zero citations, approved text cannot change, and evidence cannot be removed from an approved rule.
+Some guarantees are enforced twice, once in Python and once as SQLite triggers, so they hold even if a later script writes to the database directly: corrections cannot be updated or deleted, a proposal can only be inserted as `pending`, it cannot become `approved` with zero citations, approved text cannot change, evidence cannot be removed from an approved rule, and a stored citation cannot be rewritten. The triggers guard against mistakes, not against someone with write access to the file, who can drop them.
 
 ## Run it
 
-Python 3.10 or newer. No runtime dependencies, no API key.
+Python 3.10 or newer. No runtime dependencies, no API key. In a virtual environment:
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -71,7 +106,7 @@ correction-distiller export --out rulepack
 correction-distiller pack rulepack/rulepack.json --evidence
 ```
 
-Other commands: `retire`, `dropped`, `log`. An agent loads the pack like this:
+Other commands: `retire`, `dropped`, `log`. `python -m correction_distiller` is the same entry point. With the default mock drafter, `distill` on the week one file proposes five rules and drops none; the drop in the demo comes from a deliberately sloppy drafter defined in `demo/run_demo.py`. An agent loads the pack like this:
 
 ```python
 from correction_distiller import load_rule_pack, render_prompt
@@ -80,7 +115,7 @@ pack = load_rule_pack("rulepack/rulepack.json")  # raises PackError on a bad pac
 system_prompt += "\n\n" + render_prompt(pack)
 ```
 
-Input is JSON Lines, one correction per line:
+Input is JSON Lines (UTF-8), one correction per line. `agent` and `source` are optional:
 
 ```json
 {"quote": "Never text a customer after 8pm.", "date": "2026-03-03", "context": "sending appointment reminders", "agent": "front-desk-agent", "source": "chat review"}
@@ -88,7 +123,7 @@ Input is JSON Lines, one correction per line:
 
 ### Using a real model
 
-Copy `.env.example`, set `CD_LLM_PROVIDER=http` and the three `CD_LLM_*` values, and export them into the environment (the tool does not read `.env` files itself). `HttpChatLLM` posts to `{CD_LLM_BASE_URL}/chat/completions` with a bearer key. The evidence gate treats a real model exactly like the mock: untrusted until every quote checks out.
+Copy `.env.example`, set `CD_LLM_PROVIDER=http` and the three `CD_LLM_*` values, and export them into the environment (the tool does not read `.env` files itself). `HttpChatLLM` posts to `{CD_LLM_BASE_URL}/chat/completions` with a bearer key. The evidence gate treats a real model exactly like the mock: untrusted until every quote checks out. This path is unit tested through a fake transport and has not been run against a live endpoint.
 
 ## Tests
 
@@ -96,7 +131,7 @@ Copy `.env.example`, set `CD_LLM_PROVIDER=http` and the three `CD_LLM_*` values,
 python -m pytest
 ```
 
-110 tests, all offline. They cover ingest validation, clustering, the verbatim check, the mock and HTTP clients (the HTTP client through a fake transport), the pipeline outcomes, review rules, the database triggers, pack tamper detection, the CLI end to end, and a check that `demo/output.txt` is byte for byte what the demo prints today. CI (`.github/workflows/ci.yml`) runs the tests and the demo on Linux and Windows.
+116 tests, all offline. They cover ingest validation, clustering, the verbatim check, the mock and HTTP clients (the HTTP client through a fake transport), the pipeline outcomes, review rules, the database triggers, pack tamper detection, the CLI end to end, a check that `demo/output.txt` is exactly what the demo prints today, and a check that the excerpt at the top of this file is taken from it. CI (`.github/workflows/ci.yml`) runs the tests and the demo on Linux and Windows, Python 3.10 and 3.12.
 
 ## Demo
 
@@ -120,21 +155,23 @@ k_5c4748d29c0e  citation_not_verbatim  draft: 'Always check the crew calendar be
 
 All data in the demo and tests is synthetic.
 
-## Where this pattern runs
+## Background
 
-This is drawn from systems that run two small service companies day to day, where a handful of agents handle intake, scheduling and follow up and the owner corrects them in passing. The production version has the same shape: corrections captured with their exact wording, recurring ones distilled into candidate rules, and nothing reaching the agents' standing rules without the owner's sign off. This repository is a clean, self contained rewrite of that pattern with invented data.
+The pattern comes from the author's own agent setup for small service businesses, where a few agents handle intake, scheduling and follow up and the owner corrects them in passing. None of that system or its data is in this repository, and nothing here is evidence of how it performs. This is a self contained rewrite of the idea with invented data.
 
 ## Limitations
 
-- **Clustering is lexical.** It matches on shared stemmed words. Two corrections that mean the same thing in different vocabulary will not cluster, and two that share words but mean different things can. The threshold (`CD_SIMILARITY_THRESHOLD`, default 0.30) was tuned on short synthetic sentences, not on a real corpus. Swapping in embeddings would mean replacing `build_vectors` in `cluster.py`.
-- **Clustering is greedy and re-run from scratch each pass.** Fine for hundreds or a few thousand corrections; it is quadratic in the worst case and was not built for more.
+- **The only drafter that has been run is the mock.** It uses the shortest quote in the cluster as the rule text. That is enough to exercise the loop and sometimes produces a complaint rather than a rule (the demo rejects one of these). No real model has drafted a rule through this code, so drafting quality and how often a real model fails the verbatim check are unknown.
+- **The HTTP client has never called a live endpoint.** Request building and reply parsing are tested through a fake transport only. Expect to adjust it for your provider (no retries, no rate limit handling, no streaming).
+- **There is no capture step.** Nothing here listens to a chat tool, inbox or ticket system. Someone, or another script, has to write each correction to a JSON Lines file with its exact wording, date and context.
+- **Clustering is lexical.** It matches on shared stemmed words. Two corrections that mean the same thing in different vocabulary will not cluster, and two that share words but mean different things will. Negation words are ignored, so "Always text the customer after the visit" and "Never text the customer after the visit" land in one cluster and are drafted as one rule. The reviewer sees both quotes, but the tool does not flag the conflict. The threshold (`CD_SIMILARITY_THRESHOLD`, default 0.30) was tuned on short synthetic sentences, not on a real corpus. Swapping in embeddings would mean replacing `build_vectors` in `cluster.py`.
+- **Not benchmarked.** It has only been run on the demo (17 stored corrections) and the test fixtures. Clustering is greedy, re-run from scratch on every pass, and compares each correction with every cluster so far, so cost grows roughly with the square of the input.
 - **The gate checks quotes, not meaning.** It proves the cited words were said. It does not prove the rule follows from them. That judgement is the human reviewer's job, which is why the queue exists.
-- **The mock drafter is a stand in.** It uses the shortest quote in the cluster as the rule text. That is enough to exercise the loop and sometimes produces a complaint rather than a rule (the demo rejects one of these). Real drafting quality depends on the model you plug in.
-- **The HTTP client was not run against a live endpoint here.** Request building and reply parsing are tested through a fake transport only.
-- **Reviewer identity is a name, not a login.** `--by owner` is checked against `CD_OWNERS` and against the drafter's name, nothing stronger. Anyone with shell access can type the owner's name.
+- **Reviewer identity is a name, not a login.** With `CD_OWNERS` unset, any name other than the drafter's can approve. With it set, `--by` must be on the list. Either way anyone with shell access can type the owner's name.
 - **The pack checksum is not a signature.** It catches hand edits and truncated files. Someone who can write the file can also recompute the hash.
-- **Reinforcement adds evidence to approved rules automatically.** The approved text never changes, but the list of quotes under it grows without a second review.
+- **Reinforcement adds evidence to approved rules automatically.** The approved text never changes, but the list of quotes under it grows without a second review, and it grows with whatever the clusterer decided belongs to that topic.
 - **Suppression is permanent in this version.** Once a topic is rejected or retired, later matching corrections are not drafted again; there is no "reconsider after N more" setting.
+- **Identical wording on the same day is one correction.** Ids are a hash of quote, date, context and agent, so the same sentence said twice in one day in the same context counts once.
 - **Single process, single file.** SQLite with no locking strategy beyond its defaults. No web UI; review happens in the terminal.
 
 License: MIT, see the LICENSE file.

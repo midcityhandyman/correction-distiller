@@ -35,3 +35,15 @@ def test_env_example_holds_no_real_key():
     for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
         if line.startswith("CD_LLM_API_KEY"):
             assert line.strip() == "CD_LLM_API_KEY="
+
+
+def test_readme_excerpt_is_taken_from_the_captured_demo_output():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    block = readme.split("## What you will see", 1)[1].split("```", 2)[1]
+    excerpt = [line for line in block.splitlines() if line.strip() and line != "..."]
+    captured = (ROOT / "demo" / "output.txt").read_text(encoding="utf-8").splitlines()
+    assert len(excerpt) >= 8
+    position = 0
+    for line in excerpt:  # every line must appear, in order
+        assert line in captured[position:], line
+        position = captured.index(line, position) + 1

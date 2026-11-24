@@ -52,6 +52,12 @@ def test_drafter_cannot_approve_its_own_proposal(queued, settings, clock):
     assert _first(queued).status == PENDING
 
 
+def test_drafter_check_ignores_case(queued, settings, clock):
+    with pytest.raises(ReviewError, match="own proposal"):
+        review.approve(queued, _first(queued).id, "Mock-LLM", settings, now=clock)
+    assert _first(queued).status == PENDING
+
+
 def test_only_configured_owners_can_decide(queued, clock):
     locked = Settings(owners=("owner",))
     pid = _first(queued).id
@@ -99,7 +105,9 @@ def test_approval_rechecks_evidence_against_a_raised_bar(queued, clock):
 
 def test_approval_fails_if_a_stored_citation_is_not_verbatim(queued, settings, clock):
     p = _first(queued)
-    # Simulate a citation that was tampered with in the database.
+    # Simulate a citation that was tampered with in the database. The store
+    # blocks this with a trigger, so the tamperer has to drop the trigger first.
+    queued.db.execute("DROP TRIGGER citations_no_update")
     queued.db.execute("UPDATE citations SET quote = 'something nobody said, at length' WHERE proposal_id = ?",
                       (p.id,))
     queued.db.commit()
@@ -133,6 +141,16 @@ def test_database_refuses_illegal_transitions_and_late_edits(queued, settings, c
         queued.db.execute("UPDATE proposals SET text = 'quietly different' WHERE id = ?", (p.id,))
     with pytest.raises(sqlite3.IntegrityError, match="cannot remove evidence"):
         queued.db.execute("DELETE FROM citations WHERE proposal_id = ?", (p.id,))
+
+
+def test_database_refuses_rewriting_a_citation(queued, settings, clock):
+    pending, approved = store_pair = queued.proposals(PENDING)[:2]
+    review.approve(queued, approved.id, "owner", settings, now=clock)
+    for p in store_pair:
+        with pytest.raises(sqlite3.IntegrityError, match="citations cannot be rewritten"):
+            queued.db.execute("UPDATE citations SET quote = 'words nobody said' WHERE proposal_id = ?", (p.id,))
+    assert queued.get_proposal(approved.id).citations == approved.citations
+    assert queued.get_proposal(pending.id).citations == pending.citations
 
 
 def test_store_refuses_a_proposal_without_citations(store):

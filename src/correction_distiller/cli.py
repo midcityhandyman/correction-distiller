@@ -98,6 +98,9 @@ def run(
             return 0
         with Store(args.db or settings.db_path) as store:
             return _dispatch(args, store, settings, llm, out, now)
+    except UnicodeDecodeError as exc:
+        out(f"error: input file is not UTF-8 text ({exc.reason}); save it as UTF-8 and try again")
+        return 1
     except (ConfigError, review.ReviewError, PackError, LLMError, OSError) as exc:
         out(f"error: {exc}")
         return 1

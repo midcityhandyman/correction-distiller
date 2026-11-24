@@ -103,6 +103,16 @@ def test_loader_refuses_rules_without_approver_or_evidence_even_with_a_valid_che
             load_rule_pack(path)
 
 
+def test_loader_refuses_a_wrong_rule_count(decided, clock, tmp_path):
+    write_pack(decided, tmp_path, clock)
+    path = tmp_path / "rulepack.json"
+    pack = json.loads(path.read_text(encoding="utf-8"))
+    pack["rule_count"] = 7  # the checksum covers the rules, so it still matches
+    path.write_text(json.dumps(pack), encoding="utf-8")
+    with pytest.raises(PackError, match="rule_count"):
+        load_rule_pack(path)
+
+
 def test_loader_refuses_missing_broken_or_foreign_files(tmp_path):
     with pytest.raises(PackError, match="cannot read"):
         load_rule_pack(tmp_path / "nope.json")

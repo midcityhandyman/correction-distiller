@@ -90,3 +90,11 @@ def test_corrections_are_append_only_in_the_database(loaded):
         loaded.db.execute("UPDATE corrections SET quote = 'something nicer'")
     with pytest.raises(sqlite3.IntegrityError, match="append only"):
         loaded.db.execute("DELETE FROM corrections")
+
+
+def test_file_with_a_byte_order_mark_is_read(store, clock, tmp_path):
+    path = tmp_path / "bom.jsonl"
+    path.write_text(json.dumps(GOOD) + "\n", encoding="utf-8-sig")
+    assert path.read_bytes().startswith(b"\xef\xbb\xbf")
+    report = ingest_file(store, path, clock)
+    assert (len(report.added), report.refused) == (1, [])

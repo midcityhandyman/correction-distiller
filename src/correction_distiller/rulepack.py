@@ -80,6 +80,8 @@ def validate_pack(pack: object) -> dict:
         raise PackError("pack has no rules list")
     if pack.get("checksum") != _checksum(rules):
         raise PackError("pack checksum mismatch; the file was edited or is incomplete")
+    if pack.get("rule_count") != len(rules):
+        raise PackError(f"pack says rule_count {pack.get('rule_count')!r} but holds {len(rules)} rule(s)")
     for rule in rules:
         if not isinstance(rule, dict) or not str(rule.get("text") or "").strip():
             raise PackError("pack contains a rule with no text")

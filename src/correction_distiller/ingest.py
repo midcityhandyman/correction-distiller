@@ -85,9 +85,13 @@ def parse_record(record: object) -> Correction:
 
 
 def read_jsonl(path: str | Path) -> list[tuple[int, object]]:
-    """Read a JSON Lines file. Unparseable lines come back as the error string."""
+    """Read a JSON Lines file. Unparseable lines come back as the error string.
+
+    Read as utf-8-sig so a byte order mark (common on files saved from Windows
+    editors) does not get the first record refused as invalid JSON.
+    """
     rows: list[tuple[int, object]] = []
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, "r", encoding="utf-8-sig") as handle:
         for number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue

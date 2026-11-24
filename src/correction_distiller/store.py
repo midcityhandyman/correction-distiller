@@ -4,8 +4,9 @@ Two invariants live in the database itself, not only in Python:
 
 * corrections are append only (no UPDATE, no DELETE), so a quote that a rule
   cites can never be edited after the fact;
-* a proposal cannot be moved to 'approved' while it has zero citations, and a
-  citation cannot be removed from an approved proposal.
+* a proposal cannot be moved to 'approved' while it has zero citations, a
+  citation cannot be removed from an approved proposal, and no citation can be
+  rewritten in place (citations are only ever added).
 """
 
 from __future__ import annotations
@@ -82,6 +83,9 @@ BEGIN SELECT RAISE(ABORT, 'cannot approve a rule with no cited evidence'); END;
 CREATE TRIGGER IF NOT EXISTS approved_keeps_evidence BEFORE DELETE ON citations
 WHEN (SELECT status FROM proposals WHERE id = OLD.proposal_id) = 'approved'
 BEGIN SELECT RAISE(ABORT, 'cannot remove evidence from an approved rule'); END;
+
+CREATE TRIGGER IF NOT EXISTS citations_no_update BEFORE UPDATE ON citations
+BEGIN SELECT RAISE(ABORT, 'citations cannot be rewritten'); END;
 
 CREATE TRIGGER IF NOT EXISTS status_transitions BEFORE UPDATE OF status ON proposals
 WHEN NOT ((OLD.status = 'pending' AND NEW.status IN ('approved', 'rejected'))
