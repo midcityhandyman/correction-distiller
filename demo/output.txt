@@ -1,0 +1,127 @@
+
+========================================================================
+1. Ingest week one. Records without a date or a quote are refused.
+========================================================================
+$ correction-distiller ingest corrections_week1.jsonl
+added 14, duplicates 0, refused 2
+  refused record 15: missing date
+  refused record 16: missing verbatim quote
+
+========================================================================
+2. Distill. One drafter paraphrases its quotes and is dropped.
+========================================================================
+$ correction-distiller distill
+14 corrections, 7 clusters, 5 recurring: proposed 4, dropped 1, reinforced 0, suppressed 0, declined 0, errors 0, unchanged 0
+  proposed p_0ece6a8b41
+  proposed p_e571846df0
+  proposed p_15a68f2239
+  proposed p_d7abdb6c46
+  dropped k_5c4748d29c0e: citation_not_verbatim
+
+$ correction-distiller dropped
+k_5c4748d29c0e  citation_not_verbatim  draft: 'Always check the crew calendar before offering a same day slot.'
+  - c_a652a99e56d1: cited text is not a verbatim span of the source quote
+  - c_d1530242ef59: cited text is not a verbatim span of the source quote
+
+========================================================================
+3. The approval queue. Nothing here is in the rule pack yet.
+========================================================================
+$ correction-distiller queue
+[pending] p_0ece6a8b41  Do not quote a price before the site visit is booked.  (3 citations)
+[pending] p_e571846df0  Never text a customer after 8pm.  (3 citations)
+[pending] p_15a68f2239  Use plain punctuation in emails, no fancy dashes.  (2 citations)
+[pending] p_d7abdb6c46  Too many exclamation marks in that reply.  (2 citations)
+
+$ correction-distiller export --out rulepack
+wrote 0 rule(s) to rulepack (sha256:4f53cda18c2b)
+
+========================================================================
+4. The owner reviews: reads the evidence, approves, edits, rejects.
+========================================================================
+$ correction-distiller show p_0ece6a8b41
+[pending] p_0ece6a8b41  Do not quote a price before the site visit is booked.
+  scope:     replying to a new estimate request
+  rationale: The same correction was given 3 times (between 2026-03-02 and 2026-03-11).
+  drafted:   2026-03-16T09:02:00Z by sloppy-llm
+  evidence (3):
+    - 2026-03-02 | replying to a new estimate request | "Do not quote a price before the site visit is booked." [c_1d5b9e1eff23]
+    - 2026-03-05 | replying to a new estimate request | "You quoted a price again before booking the site visit. Book the visit first." [c_6b867b89c205]
+    - 2026-03-11 | replying to a new estimate request | "No price quotes until the site visit is on the calendar." [c_a8e381fdbb10]
+
+$ correction-distiller approve p_0ece6a8b41 --by sloppy-llm
+error: the drafter cannot review its own proposal
+$ correction-distiller approve p_0ece6a8b41 --by owner
+approved p_0ece6a8b41: Do not quote a price before the site visit is booked.
+$ correction-distiller approve p_e571846df0 --by owner --edit "Never text a customer after 8pm. Queue the message for 8am."
+approved p_e571846df0: Never text a customer after 8pm. Queue the message for 8am.
+$ correction-distiller approve p_15a68f2239 --by owner
+approved p_15a68f2239: Use plain punctuation in emails, no fancy dashes.
+$ correction-distiller reject p_d7abdb6c46 --by owner --reason "Tone preference, already covered by the style guide."
+rejected p_d7abdb6c46
+
+========================================================================
+5. Export the rule pack. Approved rules only, each with its quotes.
+========================================================================
+$ correction-distiller export --out rulepack
+wrote 3 rule(s) to rulepack (sha256:874fb3227905)
+
+$ correction-distiller pack rulepack/rulepack.json --evidence
+Standing rules (3), approved by a human owner:
+1. Do not quote a price before the site visit is booked. [replying to a new estimate request]
+   - 2026-03-02 (replying to a new estimate request): "Do not quote a price before the site visit is booked."
+   - 2026-03-05 (replying to a new estimate request): "You quoted a price again before booking the site visit. Book the visit first."
+   - 2026-03-11 (replying to a new estimate request): "No price quotes until the site visit is on the calendar."
+2. Never text a customer after 8pm. Queue the message for 8am. [sending appointment reminders]
+   - 2026-03-03 (sending appointment reminders): "Never text a customer after 8pm."
+   - 2026-03-09 (sending appointment reminders): "This text went out at 9:40pm. Customer texts after 8pm wait until morning."
+   - 2026-03-13 (sending appointment reminders): "Again, no customer texts after 8pm. Queue them for 8am."
+3. Use plain punctuation in emails, no fancy dashes. [drafting a follow up email]
+   - 2026-03-03 (drafting a follow up email): "Use plain punctuation in emails, no fancy dashes."
+   - 2026-03-10 (drafting a follow up email): "Plain punctuation only in customer emails. The fancy dashes look robotic."
+
+========================================================================
+6. Week two: new corrections, one exact duplicate.
+========================================================================
+$ correction-distiller ingest corrections_week2.jsonl
+added 3, duplicates 1, refused 0
+
+$ correction-distiller distill
+17 corrections, 7 clusters, 5 recurring: proposed 1, dropped 0, reinforced 1, suppressed 1, declined 0, errors 0, unchanged 2
+  proposed p_7b8dd6edd5
+  reinforced p_0ece6a8b41: +1 citation(s)
+  suppressed: matches decided proposal p_d7abdb6c46
+
+The price rule gained evidence. The exclamation mark cluster matched a
+rejected proposal and was not drafted again. The crew calendar cluster
+grew, was drafted again with real quotes, and is now waiting for review:
+
+$ correction-distiller queue
+[pending] p_7b8dd6edd5  Crew calendar first, then offer the same day slot.  (3 citations)
+
+========================================================================
+7. A hand edited pack is refused by the loader.
+========================================================================
+(appended an unapproved rule to rulepack/rulepack.json by hand)
+$ correction-distiller pack rulepack/rulepack.json
+error: pack checksum mismatch; the file was edited or is incomplete
+exit code 1
+
+========================================================================
+8. Audit log.
+========================================================================
+$ correction-distiller log
+2026-03-16T09:01:00Z  ingest         ingest     corrections  added 14, duplicates 0, refused 2
+2026-03-16T09:03:00Z  sloppy-llm     propose    p_0ece6a8b41  3 citation(s)
+2026-03-16T09:05:00Z  sloppy-llm     propose    p_e571846df0  3 citation(s)
+2026-03-16T09:07:00Z  sloppy-llm     propose    p_15a68f2239  2 citation(s)
+2026-03-16T09:09:00Z  evidence-gate  drop       k_5c4748d29c0e  citation_not_verbatim
+2026-03-16T09:11:00Z  sloppy-llm     propose    p_d7abdb6c46  2 citation(s)
+2026-03-16T09:13:00Z  export         export     rulepack  0 rule(s) sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+2026-03-16T09:14:00Z  owner          approve    p_0ece6a8b41
+2026-03-16T09:15:00Z  owner          approve    p_e571846df0  text edited by reviewer
+2026-03-16T09:16:00Z  owner          approve    p_15a68f2239
+2026-03-16T09:17:00Z  owner          reject     p_d7abdb6c46  Tone preference, already covered by the style guide.
+2026-03-16T09:19:00Z  export         export     rulepack  3 rule(s) sha256:874fb3227905a755f52948efa773875ad6585a32a5e203f18294deea807052a3
+2026-03-23T09:01:00Z  ingest         ingest     corrections  added 3, duplicates 1, refused 0
+2026-03-23T09:03:00Z  distill        reinforce  p_0ece6a8b41  1 new citation(s)
+2026-03-23T09:05:00Z  mock-llm       propose    p_7b8dd6edd5  3 citation(s)
